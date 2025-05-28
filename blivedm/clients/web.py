@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import hashlib
+import time
+import re
+import urllib.parse
 from typing import *
 
 import aiohttp
@@ -15,6 +19,7 @@ __all__ = (
 
 logger = logging.getLogger('blivedm')
 
+WBI_KEYS_URL = 'https://api.bilibili.com/x/web-interface/nav'
 UID_INIT_URL = 'https://api.bilibili.com/x/web-interface/nav'
 BUVID_INIT_URL = 'https://www.bilibili.com/'
 ROOM_INIT_URL = 'https://api.live.bilibili.com/room/v1/Room/get_info'
@@ -197,16 +202,47 @@ class BLiveClient(ws_base.WebSocketClientBase):
         self._room_id = data['room_id']
         self._room_owner_uid = data['uid']
         return True
+    
+    def _get_wbi_mixin_key(self, orig: str) -> str:
+        return ''.join([orig[t] for t in utils.WBI_MIXIN_KEY_ENC_TAB])[:32]
+    
+    async def _get_wbi_keys(self, session: aiohttp.ClientSession):
+        async with session.get(WBI_KEYS_URL, headers={'User-Agent': utils.USER_AGENT}) as resp:
+            if resp.content_type != 'application/json':
+                text = await resp.text()
+                raise RuntimeError(f"Failed to get WBI Keys, message: {text[:200]}")
+            data = await resp.json()
+            img_url = data['data']['wbi_img']['img_url']
+            sub_url = data['data']['wbi_img']['sub_url']
+            img_key = img_url.split('/')[-1].split('.')[0]
+            sub_key = sub_url.split('/')[-1].split('.')[0]
+            return img_key, sub_key
+
+    def _wbi_sign(self, params: dict, img_key: str, sub_key: str) -> dict:
+        params = params.copy()
+        params['wts'] = int(time.time())
+        mixin_key = self._get_wbi_mixin_key(img_key + sub_key)
+        # 过滤特殊字符
+        for k, v in params.items():
+            if isinstance(v, str):
+                params[k] = re.sub(r"[!'()*]", '', v)
+        # 按key升序
+        items = sorted(params.items())
+        query = urllib.parse.urlencode(items)
+        w_rid = hashlib.md5((query + mixin_key).encode('utf-8')).hexdigest()
+        params['w_rid'] = w_rid
+        return params
 
     async def _init_host_server(self):
         try:
+            img_key, sub_key = await self._get_wbi_keys(self._session)
             async with self._session.get(
                 DANMAKU_SERVER_CONF_URL,
                 headers={'User-Agent': utils.USER_AGENT},
-                params={
+                params=self._wbi_sign({
                     'id': self._room_id,
                     'type': 0
-                },
+                }, img_key, sub_key),
             ) as res:
                 if res.status != 200:
                     logger.warning('room=%d _init_host_server() failed, status=%d, reason=%s', self._room_id,
