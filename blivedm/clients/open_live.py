@@ -18,20 +18,13 @@ __all__ = (
 
 logger = logging.getLogger('blivedm')
 
-START_URL = 'https://live-open.biliapi.com/v2/app/start'
-HEARTBEAT_URL = 'https://live-open.biliapi.com/v2/app/heartbeat'
-END_URL = 'https://live-open.biliapi.com/v2/app/end'
-
-
 class OpenLiveClient(ws_base.WebSocketClientBase):
     """
     开放平台客户端
 
     文档参考：https://open-live.bilibili.com/document/
 
-    :param access_key_id: 在开放平台申请的access_key_id
-    :param access_key_secret: 在开放平台申请的access_key_secret
-    :param app_id: 在开放平台创建的项目ID
+    :param api_url: 服务端鉴权服务API地址
     :param room_owner_auth_code: 主播身份码
     :param session: cookie、连接池
     :param heartbeat_interval: 发送连接心跳包的间隔时间（秒）
@@ -40,9 +33,7 @@ class OpenLiveClient(ws_base.WebSocketClientBase):
 
     def __init__(
         self,
-        access_key_id: str,
-        access_key_secret: str,
-        app_id: int,
+        api_url: str,
         room_owner_auth_code: str,
         *,
         session: Optional[aiohttp.ClientSession] = None,
@@ -51,9 +42,7 @@ class OpenLiveClient(ws_base.WebSocketClientBase):
     ):
         super().__init__(session, heartbeat_interval)
 
-        self._access_key_id = access_key_id
-        self._access_key_secret = access_key_secret
-        self._app_id = app_id
+        self._api_url = api_url
         self._room_owner_auth_code = room_owner_auth_code
         self._game_heartbeat_interval = game_heartbeat_interval
 
@@ -124,24 +113,8 @@ class OpenLiveClient(ws_base.WebSocketClientBase):
 
     def _request_open_live(self, url, body: dict):
         body_bytes = json.dumps(body).encode('utf-8')
-        headers = {
-            'x-bili-accesskeyid': self._access_key_id,
-            'x-bili-content-md5': hashlib.md5(body_bytes).hexdigest(),
-            'x-bili-signature-method': 'HMAC-SHA256',
-            'x-bili-signature-nonce': uuid.uuid4().hex,
-            'x-bili-signature-version': '1.0',
-            'x-bili-timestamp': str(int(datetime.datetime.now().timestamp())),
-        }
 
-        str_to_sign = '\n'.join(
-            f'{key}:{value}'
-            for key, value in headers.items()
-        )
-        signature = hmac.new(
-            self._access_key_secret.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256
-        ).hexdigest()
-        headers['Authorization'] = signature
-
+        headers = {}
         headers['Content-Type'] = 'application/json'
         headers['Accept'] = 'application/json'
         return self._session.post(url, headers=headers, data=body_bytes)
@@ -164,8 +137,8 @@ class OpenLiveClient(ws_base.WebSocketClientBase):
     async def _start_game(self):
         try:
             async with self._request_open_live(
-                START_URL,
-                {'code': self._room_owner_auth_code, 'app_id': self._app_id}
+                f'{self._api_url}/v2/app/start',
+                {'code': self._room_owner_auth_code}
             ) as res:
                 if res.status != 200:
                     logger.warning('_start_game() failed, status=%d, reason=%s', res.status, res.reason)
@@ -202,8 +175,8 @@ class OpenLiveClient(ws_base.WebSocketClientBase):
 
         try:
             async with self._request_open_live(
-                END_URL,
-                {'app_id': self._app_id, 'game_id': self._game_id}
+                f'{self._api_url}/v2/app/end',
+                {'game_id': self._game_id}
             ) as res:
                 if res.status != 200:
                     logger.warning('room=%d _end_game() failed, status=%d, reason=%s',
@@ -245,7 +218,7 @@ class OpenLiveClient(ws_base.WebSocketClientBase):
             # 保存一下，防止await之后game_id改变
             game_id = self._game_id
             async with self._request_open_live(
-                HEARTBEAT_URL,
+                f'{self._api_url}/v2/app/heartbeat',
                 {'game_id': game_id}
             ) as res:
                 if res.status != 200:
