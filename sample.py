@@ -18,7 +18,11 @@ TEST_ROOM_IDS = [
     23105590,
 ]
 
-# 这里填一个已登录账号的cookie的SESSDATA字段的值。不填也可以连接，但是收到弹幕的用户名会打码，UID会变成0
+# 这里填一个已登录账号的cookie的SESSDATA字段的值
+# 不填也可以连接，但是收到弹幕的用户名会打码，UID会变成0
+# ==============================================================================
+#      如果你是从 `Chrome开发者工具 - 应用` 复制cookie的，不要勾选“显示已解码的网址”
+# ==============================================================================
 SESSDATA = ''
 
 session: Optional[aiohttp.ClientSession] = None
@@ -106,12 +110,13 @@ class MyHandler(blivedm.BaseHandler):
     #     print(f'[{client.room_id}] {message.username} 上舰，guard_level={message.guard_level}')
 
     def _on_user_toast_v2(self, client: blivedm.BLiveClient, message: web_models.UserToastV2Message):
-        print(f'[{client.room_id}] {message.username} 上舰，guard_level={message.guard_level}')
+        if message.source != 2:
+            print(f'[{client.room_id}] {message.username} 上舰，guard_level={message.guard_level}')
 
     def _on_super_chat(self, client: blivedm.BLiveClient, message: web_models.SuperChatMessage):
         print(f'[{client.room_id}] 醒目留言 ¥{message.price} {message.uname}：{message.message}')
 
-    # def _on_interact_word(self, client: blivedm.BLiveClient, message: web_models.InteractWordMessage):
+    # def _on_interact_word_v2(self, client: blivedm.BLiveClient, message: web_models.InteractWordV2Message):
     #     if message.msg_type == 1:
     #         print(f'[{client.room_id}] {message.username} 进入房间')
 
